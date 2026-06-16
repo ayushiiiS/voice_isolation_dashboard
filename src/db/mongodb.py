@@ -68,6 +68,9 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.recordings.create_index("job_id")
     await db.analytics.create_index("recording_id", unique=True)
     await db.reports.create_index("recording_id")
+    await db.stt_sessions.create_index("user_id")
+    await db.stt_sessions.create_index("session_id", unique=True)
+    await db.stt_sessions.create_index("started_at")
 
 
 def col_users(db: AsyncIOMotorDatabase):
@@ -88,3 +91,11 @@ def col_analytics(db: AsyncIOMotorDatabase):
 
 def col_reports(db: AsyncIOMotorDatabase):
     return db.reports
+
+
+def col_stt_sessions(db: AsyncIOMotorDatabase):
+    return db.stt_sessions
+
+
+def col_stt_accuracy_metrics(db: AsyncIOMotorDatabase):
+    return db.stt_accuracy_metrics

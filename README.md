@@ -33,6 +33,7 @@ voice_isolation/
 - **Interaction Viewer**: Blue Machines-style waveform + analytics view
 - **Reports**: Export PDF, CSV, JSON per call
 - **Retry**: Re-process failed batch jobs
+- **Live STT Comparison**: Stream microphone audio to multiple STT providers in parallel, compare confidence/latency, auto or manual provider selection ([docs/STT_MULTI_PROVIDER.md](docs/STT_MULTI_PROVIDER.md))
 
 ## Tech Stack
 

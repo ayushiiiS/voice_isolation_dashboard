@@ -204,6 +204,12 @@ class AudioExtractor:
         logger.info("Exported user-only audio to %s", output_path)
         return output_path
 
+    def export_user_stt_wav(self, audio: AudioSegment, output_path: Path) -> Path:
+        """Export STT-optimized user audio (16 kHz mono PCM16)."""
+        from src.stt.audio_preprocess import export_stt_ready_wav
+
+        return export_stt_ready_wav(audio, output_path)
+
     @staticmethod
     def duration_seconds(audio: AudioSegment) -> float:
         return len(audio) / 1000.0

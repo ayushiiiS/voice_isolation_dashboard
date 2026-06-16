@@ -104,6 +104,34 @@ export const api = {
 
   reports: (token: string, recordingId: string) =>
     request<ReportLinks>(`/reports/${recordingId}`, {}, token),
+
+  sttProviders: (token: string) =>
+    request<{ providers: SttProviderInfo[] }>("/stt/providers", {}, token),
+
+  sttLanguages: (token: string) =>
+    request<{ languages: SttLanguageOption[] }>("/stt/languages", {}, token),
+
+  createSttSession: (
+    token: string,
+    config: {
+      recording_id: string;
+      auto_detect_language?: boolean;
+      language?: string | null;
+    },
+  ) =>
+    request<SttCreateSessionResponse>("/stt/sessions", {
+      method: "POST",
+      body: JSON.stringify(config),
+    }, token),
+
+  sttSession: (token: string, sessionId: string) =>
+    request<SttSessionSnapshot>(`/stt/sessions/${sessionId}`, {}, token),
+
+  updateSttSelection: (token: string, sessionId: string, body: SttUpdateSelectionRequest) =>
+    request<SttSessionSnapshot>(`/stt/sessions/${sessionId}/selection`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }, token),
 };
 
 export interface User {
@@ -237,4 +265,137 @@ export interface ReportLinks {
   json_url?: string;
   csv_url?: string;
   pdf_url?: string;
+}
+
+export type SttSelectionMode = "auto" | "manual";
+
+export interface SttProviderInfo {
+  id: string;
+  display_name: string;
+  configured: boolean;
+}
+
+export interface SttSessionConfig {
+  recording_id: string;
+  auto_detect_language?: boolean;
+  language?: string | null;
+  enabled_providers?: string[];
+  selection_mode?: SttSelectionMode;
+  manual_provider?: string | null;
+  hysteresis_threshold?: number;
+  sample_rate?: number;
+  language?: string;
+}
+
+export interface SttLanguageOption {
+  code: string;
+  label: string;
+}
+
+export interface SttLanguageInfo {
+  language: string;
+  language_code: string;
+  confidence: number;
+  method: string;
+}
+
+export interface SttCreateSessionResponse {
+  session_id: string;
+  ws_url: string;
+}
+
+export interface SttUpdateSelectionRequest {
+  selection_mode: SttSelectionMode;
+  manual_provider?: string | null;
+  hysteresis_threshold?: number;
+}
+
+export interface SttProviderMetrics {
+  provider: string;
+  current_confidence?: number | null;
+  average_confidence?: number | null;
+  current_latency_ms: number;
+  average_latency_ms: number;
+  error_count: number;
+  reconnect_count: number;
+  uptime_seconds: number;
+  transcript_count: number;
+  last_error?: string | null;
+}
+
+export interface SttProviderState {
+  provider: string;
+  display_name: string;
+  status: "connecting" | "active" | "degraded" | "disconnected" | "unavailable" | "error";
+  partial_transcript: string;
+  final_transcript: string;
+  raw_confidence?: number | null;
+  normalized_confidence?: number | null;
+  composite_score?: number | null;
+  latency_ms: number;
+  ranking: number;
+  metrics: SttProviderMetrics;
+  error?: string | null;
+  is_simulated: boolean;
+}
+
+export interface SttAudioQuality {
+  score: number;
+  sample_rate: number;
+  channels: number;
+  duration_seconds: number;
+  clipping_ratio: number;
+  silence_ratio: number;
+  snr_db: number;
+  warnings: string[];
+  source_label?: string;
+}
+
+export interface SttLanguageCandidate {
+  language: string;
+  language_code: string;
+  confidence: number;
+}
+
+export interface SttProviderScore {
+  provider: string;
+  confidence: number;
+  completeness: number;
+  language_match: number;
+  composite: number;
+  word_count: number;
+}
+
+export interface SttSessionSnapshot {
+  session_id: string;
+  selection_mode: SttSelectionMode;
+  selected_provider?: string | null;
+  auto_selected_provider?: string | null;
+  best_provider?: string | null;
+  best_confidence?: number | null;
+  primary_transcript: string;
+  consensus_transcript?: string;
+  processed_transcript?: string;
+  provider_raw_transcripts?: Record<string, string>;
+  provider_scores?: SttProviderScore[];
+  warnings?: string[];
+  providers: SttProviderState[];
+  source?: "microphone" | "isolated_user_audio";
+  recording_id?: string | null;
+  recording_file_name?: string | null;
+  user_audio_url?: string | null;
+  feed_progress?: number;
+  feed_complete?: boolean;
+  language?: string;
+  detected_language?: string | null;
+  language_code?: string | null;
+  language_confidence?: number | null;
+  language_detection_method?: string | null;
+  language_mode?: "fixed" | "auto" | "multilingual";
+  language_candidates?: SttLanguageCandidate[];
+  language_hints?: string[];
+  audio_quality?: SttAudioQuality | null;
+  audio_source_type?: string | null;
+  transcript_mode?: "consensus" | "single";
+  updated_at: string;
 }

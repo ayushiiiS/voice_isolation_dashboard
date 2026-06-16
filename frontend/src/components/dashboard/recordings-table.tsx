@@ -21,6 +21,7 @@ import {
   Download,
   ExternalLink,
   Headphones,
+  Radio,
   RefreshCw,
   Search,
   Upload,
@@ -370,6 +371,13 @@ export function RecordingsTable({
                                           >
                                             <Headphones className="h-4 w-4" />
                                           </a>
+                                        </Button>
+                                      )}
+                                      {rec.user_audio_url && (
+                                        <Button variant="ghost" size="sm" asChild title="STT Comparison">
+                                          <Link href={`/stt-comparison?recordingId=${rec.id}`}>
+                                            <Radio className="h-4 w-4" />
+                                          </Link>
                                         </Button>
                                       )}
                                       {rec.user_audio_url && (

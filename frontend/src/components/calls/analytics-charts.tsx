@@ -29,11 +29,13 @@ export function AnalyticsCharts({ data }: { data: AnalyticsResponse }) {
     latency: p.latency_ms,
   }));
 
-  const confidenceData = data.transcript.slice(0, 30).map((t, i) => ({
-    idx: i + 1,
-    confidence: t.confidence * 100,
-    role: t.role,
-  }));
+  const confidenceData = data.transcript
+    .filter((t) => t.role === "user")
+    .slice(0, 30)
+    .map((t, i) => ({
+      idx: i + 1,
+      confidence: t.confidence * 100,
+    }));
 
   const sentimentData = [
     { name: "Positive", value: data.sentiment_breakdown.positive * 100, fill: "#22c55e" },
@@ -78,7 +80,7 @@ export function AnalyticsCharts({ data }: { data: AnalyticsResponse }) {
       </Card>
 
       <Card className="border-border/60 bg-card/80">
-        <CardHeader><CardTitle>STT Confidence</CardTitle></CardHeader>
+        <CardHeader><CardTitle>User STT Confidence</CardTitle></CardHeader>
         <CardContent className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={confidenceData}>

@@ -22,10 +22,13 @@ from src.api.jobs_routes import router as jobs_router
 from src.api.media_routes import router as media_router
 from src.api.reports_routes import router as reports_router
 from src.api.routes import router as isolation_router
+from src.api.stt_debug_routes import router as stt_debug_router
+from src.api.stt_routes import router as stt_router
 from src.api.upload_routes import router as upload_router
 from src.db.mongodb import close_db, connect_db
 from src.utils.gcs_auth import GcsPermissionError
 from src.utils.gcs_storage import get_storage_client, log_gcp_identity_at_startup
+from src.stt.language_detection import preload_whisper_model
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
@@ -62,6 +65,11 @@ async def lifespan(app: FastAPI):
             "GCS startup check skipped (%s). Jobs will use local storage if uploads fail.",
             exc,
         )
+    if os.getenv("WHISPER_PRELOAD", "true").lower() == "true":
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, preload_whisper_model)
     yield
     await close_db()
     logger.info("Platform shutting down")
@@ -92,6 +100,8 @@ app.include_router(analytics_router)
 app.include_router(reports_router)
 app.include_router(media_router)
 app.include_router(isolation_router)
+app.include_router(stt_router)
+app.include_router(stt_debug_router)
 
 
 @app.get("/")
@@ -106,6 +116,7 @@ async def root() -> dict:
             "analytics": "GET /analytics/{id}",
             "reports": "GET /reports/{id}",
             "health": "GET /health",
+            "stt": "POST /stt/sessions, WS /stt/ws/{session_id}",
         },
     }
 

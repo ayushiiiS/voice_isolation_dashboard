@@ -23,8 +23,10 @@ import {
   ExternalLink,
   FileText,
   Headphones,
+  Radio,
   ScrollText,
 } from "lucide-react";
+import { SttComparisonView } from "@/components/stt/stt-comparison-view";
 
 function MetricTile({
   label,
@@ -126,6 +128,9 @@ export default function CallDetailsPage() {
                 <TabsTrigger value="analytics" className="gap-1.5">
                   <BarChart3 className="h-4 w-4" /> Analytics
                 </TabsTrigger>
+                <TabsTrigger value="stt" className="gap-1.5">
+                  <Radio className="h-4 w-4" /> STT Comparison
+                </TabsTrigger>
                 <TabsTrigger value="logs" className="gap-1.5">
                   <FileText className="h-4 w-4" /> Reports
                 </TabsTrigger>
@@ -156,7 +161,7 @@ export default function CallDetailsPage() {
                     value={`${Math.round(data.avg_agent_latency_ms)} ms`}
                   />
                   <MetricTile
-                    label="User Confidence"
+                    label="User STT Confidence"
                     value={`${(data.avg_user_confidence * 100).toFixed(1)}%`}
                   />
                   <MetricTile label="Sentiment" value={data.sentiment} />
@@ -194,6 +199,19 @@ export default function CallDetailsPage() {
 
               <TabsContent value="analytics">
                 <AnalyticsCharts data={data} />
+              </TabsContent>
+
+              <TabsContent value="stt">
+                {data.recording.user_audio_url ? (
+                  <SttComparisonView
+                    recordingId={id}
+                    recordingFileName={data.recording.file_name}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Isolated user audio is not available yet. Process this recording first.
+                  </p>
+                )}
               </TabsContent>
 
               <TabsContent value="logs">

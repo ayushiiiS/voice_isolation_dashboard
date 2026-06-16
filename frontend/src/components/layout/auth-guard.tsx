@@ -5,14 +5,14 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { token, loading } = useAuth();
+  const { token, user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !token) {
+    if (!loading && (!token || !user)) {
       router.replace("/login");
     }
-  }, [loading, token, router]);
+  }, [loading, token, user, router]);
 
   if (loading) {
     return (
@@ -22,6 +22,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!token) return null;
+  if (!token || !user) return null;
   return <>{children}</>;
 }

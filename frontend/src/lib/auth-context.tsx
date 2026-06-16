@@ -21,18 +21,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = localStorage.getItem("token");
-    if (stored) {
-      setToken(stored);
-      api.me(stored)
-        .then(setUser)
-        .catch(() => {
-          localStorage.removeItem("token");
-          setToken(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
+    if (!stored) {
       setLoading(false);
+      return;
     }
+    api
+      .me(stored)
+      .then((profile) => {
+        setUser(profile);
+        setToken(stored);
+      })
+      .catch(() => {
+        localStorage.removeItem("token");
+        setToken(null);
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = async (email: string, password: string) => {

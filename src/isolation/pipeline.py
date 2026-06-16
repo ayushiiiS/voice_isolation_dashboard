@@ -116,7 +116,7 @@ class VoiceIsolationPipeline:
             report("exporting", 0.0)
             isolated_path = out_dir / "user_only.wav"
             agent_path = out_dir / "agent_only.wav"
-            self.audio_extractor.export_wav(human_audio, isolated_path)
+            self.audio_extractor.export_user_stt_wav(human_audio, isolated_path)
             self.audio_extractor.export_wav(agent_audio, agent_path)
             report("exporting", 1.0)
 

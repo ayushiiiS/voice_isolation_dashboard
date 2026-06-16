@@ -35,6 +35,13 @@ requests>=2.31.0
 tqdm>=4.66.0
 google-cloud-storage>=2.14.0
 python-dotenv>=1.0.0
+websockets>=12.0
+openai-whisper>=20231117
+
+# Optional STT provider SDKs (install when using real providers)
+# azure-cognitiveservices-speech
+# google-cloud-speech
+# amazon-transcribe
 
 # Testing
 pytest>=8.0.0
