@@ -230,7 +230,7 @@ class AudioExtractor:
         filename = f"download_{uuid.uuid4().hex}{ext}"
         dest = self.temp_dir / filename
 
-        from src.utils.gcs_download import try_download_gcs_source
+        from src.utils.gcs_download import is_signed_gcs_http_url, try_download_gcs_source
 
         gcs_path = try_download_gcs_source(url, dest)
         if gcs_path is not None:
@@ -245,6 +245,14 @@ class AudioExtractor:
             )
 
         response = requests.get(url, stream=True, timeout=120, allow_redirects=True)
+        if response.status_code >= 400 and is_signed_gcs_http_url(url):
+            from src.utils.gcs_download import try_download_expired_signed_url
+
+            gcs_path = try_download_expired_signed_url(url, dest)
+            if gcs_path is not None:
+                logger.info("Downloaded audio via GCS API fallback to %s", gcs_path)
+                fmt = validate_downloaded_audio(gcs_path)
+                return ensure_extension(gcs_path, fmt)
         response.raise_for_status()
 
         content_type = (response.headers.get("Content-Type") or "").lower()

@@ -50,11 +50,49 @@ def parse_gcs_location(source: str) -> Optional[tuple[str, str]]:
     return None
 
 
-def _is_signed_gcs_http_url(source: str) -> bool:
+def is_signed_gcs_http_url(source: str) -> bool:
     """Return True when the URL already carries V2/V4 signature query params."""
     parsed = urlparse(source)
     query = parsed.query or ""
     return "X-Goog-Signature" in query or "GoogleAccessId" in query
+
+
+def _is_signed_gcs_http_url(source: str) -> bool:
+    return is_signed_gcs_http_url(source)
+
+
+def try_download_expired_signed_url(source: str, destination: Path) -> Optional[Path]:
+    """
+    When a signed GCS HTTPS URL is expired or invalid, download via GCS API instead.
+
+    Parses bucket/object from the URL path (ignoring signature query params).
+    """
+    if not is_signed_gcs_http_url(source):
+        return None
+    location = parse_gcs_location(source)
+    if location is None:
+        return None
+    bucket_name, object_path = location
+    logger.warning(
+        "Signed GCS URL failed; retrying via GCS API for gs://%s/%s",
+        bucket_name,
+        object_path,
+    )
+    try:
+        return download_gcs_object(bucket_name, object_path, destination)
+    except Exception as exc:
+        logger.error(
+            "GCS API fallback failed for gs://%s/%s: %s",
+            bucket_name,
+            object_path,
+            exc,
+        )
+        raise RuntimeError(
+            f"Signed GCS URL expired and GCS API download failed for "
+            f"gs://{bucket_name}/{object_path}. "
+            "Ensure GOOGLE_APPLICATION_CREDENTIALS or gcloud auth is configured "
+            "with storage.objects.get on the source bucket."
+        ) from exc
 
 
 def download_gcs_object(
