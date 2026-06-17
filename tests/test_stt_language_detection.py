@@ -28,6 +28,9 @@ def test_provider_language_normalization():
     assert provider_language("openai", "hi-IN") == "hi"
     assert provider_language("azure", "hi-IN") == "hi-IN"
     assert provider_language("google", "en") == "en-US"
+    assert provider_language("sarvam", "hi-IN") == "hi-IN"
+    assert provider_language("sarvam", "en") == "en-IN"
+    assert provider_language("sarvam", "auto") == "auto"
 
 
 def test_detect_language_fallback_without_whisper(temp_dir, monkeypatch):

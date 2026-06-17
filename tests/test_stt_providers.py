@@ -49,4 +49,8 @@ def test_registry_creates_simulated_when_unconfigured(monkeypatch):
 
 def test_registry_all_provider_ids():
     ids = ProviderRegistry.available_provider_ids()
-    assert set(ids) == {"deepgram", "azure", "openai", "google", "aws"}
+    assert set(ids) == {"deepgram", "azure", "sarvam"}
+
+
+def test_registry_default_provider_ids():
+    assert ProviderRegistry.default_provider_ids() == ["deepgram", "azure", "sarvam"]

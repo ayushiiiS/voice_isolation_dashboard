@@ -60,7 +60,7 @@ class ProviderInfo(BaseModel):
 class CreateSessionRequest(BaseModel):
     recording_id: str
     enabled_providers: list[str] = Field(
-        default_factory=lambda: list(ProviderRegistry.available_provider_ids())
+        default_factory=lambda: list(ProviderRegistry.default_provider_ids())
     )
     selection_mode: SelectionMode = SelectionMode.AUTO
     manual_provider: Optional[str] = None

@@ -116,10 +116,37 @@ def iso639_to_bcp47(code: str) -> str:
     return ISO639_TO_BCP47.get(normalized, f"{normalized}-{normalized.upper()}")
 
 
+# Sarvam AI Indian-language locales (BCP-47).
+SARVAM_LOCALES: dict[str, str] = {
+    "en": "en-IN",
+    "hi": "hi-IN",
+    "bn": "bn-IN",
+    "gu": "gu-IN",
+    "kn": "kn-IN",
+    "ml": "ml-IN",
+    "mr": "mr-IN",
+    "pa": "pa-IN",
+    "ta": "ta-IN",
+    "te": "te-IN",
+    "as": "as-IN",
+    "ur": "ur-IN",
+    "ne": "ne-IN",
+    "od": "od-IN",
+    "or": "od-IN",
+}
+
+
 def provider_language(provider_id: str, bcp47: str) -> str:
     """Normalize BCP-47 locale for a specific STT provider API."""
     if not bcp47 or bcp47.lower() == "auto":
         return "auto"
+    if provider_id == "sarvam":
+        if bcp47.lower() == "unknown":
+            return "unknown"
+        if bcp47 in set(SARVAM_LOCALES.values()):
+            return bcp47
+        code = bcp47.split("-")[0].lower()
+        return SARVAM_LOCALES.get(code, "unknown")
     if "-" in bcp47 and provider_id in {"azure", "google", "aws"}:
         return bcp47
     code = bcp47.split("-")[0].lower()

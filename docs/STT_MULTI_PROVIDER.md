@@ -12,7 +12,7 @@ Browser (mic PCM16) ──WebSocket──► FastAPI /stt/ws/{session_id}
                                         │
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
-              DeepgramProvider    AzureSpeechProvider   OpenAiSttProvider ...
+              DeepgramProvider    AzureSpeechProvider   SarvamSttProvider
                     │                   │                   │
                     └───────────────────┴───────────────────┘
                                         │
@@ -46,15 +46,11 @@ Set API keys in `.env` (see `.env.example`). When a provider is not configured a
 |----------|----------|------------|
 | Deepgram | `DEEPGRAM_API_KEY` | Yes (0–1 word avg) |
 | Azure | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | Yes (NBest) |
-| OpenAI | `OPENAI_API_KEY` | No (N/A) |
-| Google | `GOOGLE_APPLICATION_CREDENTIALS` | No (N/A) |
-| AWS | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | No (N/A) |
+| Sarvam | `SARVAM_API_KEY` | Yes (`language_probability` with auto-detect) |
 
-Optional SDK packages for real providers (not required for simulated mode):
+Optional SDK package for Azure (not required for simulated mode):
 
 - `azure-cognitiveservices-speech`
-- `google-cloud-speech`
-- `amazon-transcribe`
 
 ## API
 

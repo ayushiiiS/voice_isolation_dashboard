@@ -113,6 +113,34 @@ async def test_feed_after_start_leaves_transcripts_blank(config, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_composite_score_uses_partial_transcript(config, monkeypatch):
+    orchestrator = MultiProviderOrchestrator(config=config)
+
+    monkeypatch.setattr(
+        "src.stt.orchestrator.ProviderRegistry.create_enabled",
+        lambda enabled: [
+            SimulatedSttProvider("deepgram", "Deepgram", base_confidence=0.94),
+            SimulatedSttProvider("azure", "Azure Speech", base_confidence=0.91),
+        ],
+    )
+
+    await orchestrator.start()
+    await orchestrator.set_audio_duration(30.0)
+
+    async with orchestrator._lock:
+        deepgram = orchestrator._states["deepgram"]
+        deepgram.partial_transcript = "hello world this is a partial transcript"
+        deepgram.normalized_confidence = 88.0
+
+    await orchestrator._publish_snapshot()
+    snapshot = orchestrator.current_snapshot()
+    scored = next(p for p in snapshot.providers if p.provider == "deepgram")
+    assert scored.composite_score is not None
+    assert scored.ranking == 1
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
 async def test_provider_failure_does_not_break_session(config, monkeypatch):
     class FailingProvider(SimulatedSttProvider):
         def __init__(self):

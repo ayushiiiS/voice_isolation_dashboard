@@ -15,9 +15,7 @@ const PROVIDER_OPTIONS = [
   { id: "auto", label: "Auto (highest confidence)" },
   { id: "deepgram", label: "Deepgram" },
   { id: "azure", label: "Azure Speech" },
-  { id: "openai", label: "OpenAI" },
-  { id: "google", label: "Google STT" },
-  { id: "aws", label: "AWS Transcribe" },
+  { id: "sarvam", label: "Sarvam AI" },
 ];
 
 interface Props {

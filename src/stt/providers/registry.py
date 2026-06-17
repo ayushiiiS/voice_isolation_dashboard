@@ -7,11 +7,10 @@ import os
 from typing import Type
 
 from src.stt.base import SttProviderAdapter
-from src.stt.providers.aws_transcribe import AwsTranscribeProvider
+from src.stt.constants import DEFAULT_STT_PROVIDERS
 from src.stt.providers.azure import AzureSpeechProvider
 from src.stt.providers.deepgram import DeepgramProvider
-from src.stt.providers.google_stt import GoogleSttProvider
-from src.stt.providers.openai import OpenAiSttProvider
+from src.stt.providers.sarvam import SarvamSttProvider
 from src.stt.providers.simulated import SimulatedSttProvider
 
 logger = logging.getLogger(__name__)
@@ -19,25 +18,19 @@ logger = logging.getLogger(__name__)
 SIMULATED_PROFILES = {
     "deepgram": dict(base_confidence=0.94, base_latency_ms=120.0, provides_confidence=True),
     "azure": dict(base_confidence=0.91, base_latency_ms=150.0, provides_confidence=True),
-    "openai": dict(base_confidence=0.89, base_latency_ms=210.0, provides_confidence=False),
-    "google": dict(base_confidence=0.86, base_latency_ms=180.0, provides_confidence=False),
-    "aws": dict(base_confidence=0.88, base_latency_ms=195.0, provides_confidence=False),
+    "sarvam": dict(base_confidence=0.90, base_latency_ms=140.0, provides_confidence=True),
 }
 
 REAL_PROVIDERS: dict[str, Type[SttProviderAdapter]] = {
     "deepgram": DeepgramProvider,
     "azure": AzureSpeechProvider,
-    "openai": OpenAiSttProvider,
-    "google": GoogleSttProvider,
-    "aws": AwsTranscribeProvider,
+    "sarvam": SarvamSttProvider,
 }
 
 DISPLAY_NAMES = {
     "deepgram": "Deepgram",
     "azure": "Azure Speech",
-    "openai": "OpenAI",
-    "google": "Google STT",
-    "aws": "AWS Transcribe",
+    "sarvam": "Sarvam AI",
 }
 
 
@@ -47,6 +40,10 @@ class ProviderRegistry:
     @staticmethod
     def available_provider_ids() -> list[str]:
         return list(REAL_PROVIDERS.keys())
+
+    @staticmethod
+    def default_provider_ids() -> list[str]:
+        return list(DEFAULT_STT_PROVIDERS)
 
     @staticmethod
     def create(provider_id: str) -> SttProviderAdapter:
@@ -74,8 +71,9 @@ class ProviderRegistry:
         return unavailable
 
     @staticmethod
-    def create_enabled(enabled: list[str]) -> list[SttProviderAdapter]:
-        return [ProviderRegistry.create(pid) for pid in enabled]
+    def create_enabled(enabled: list[str] | None = None) -> list[SttProviderAdapter]:
+        provider_ids = enabled or DEFAULT_STT_PROVIDERS
+        return [ProviderRegistry.create(pid) for pid in provider_ids]
 
 
 class _UnavailableProvider(SttProviderAdapter):
@@ -100,8 +98,6 @@ class _UnavailableProvider(SttProviderAdapter):
         language_mode: str = "fixed",
         language_hints: list[str] | None = None,
     ) -> None:
-        from src.stt.models import ProviderStatus
-
         raise RuntimeError(f"{self.display_name} is not configured")
 
     async def send_audio(self, pcm_bytes: bytes) -> None:
@@ -110,7 +106,14 @@ class _UnavailableProvider(SttProviderAdapter):
     async def disconnect(self) -> None:
         pass
 
-    async def start(self, sample_rate: int, language: str) -> None:
+    async def start(
+        self,
+        sample_rate: int,
+        language: str,
+        *,
+        language_mode: str = "fixed",
+        language_hints: list[str] | None = None,
+    ) -> None:
         from src.stt.models import ProviderStatus
 
         await self._emit_status(

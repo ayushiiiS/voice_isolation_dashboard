@@ -7,7 +7,8 @@ Each STT provider exposes confidence differently:
 - OpenAI Whisper / Realtime: no native confidence → N/A.
 - Google Cloud STT: no utterance-level confidence in streaming v2 → N/A
   (alternatives: use stability or word-level if present).
-- AWS Transcribe: no confidence in standard streaming → N/A.
+- Sarvam: ``language_probability`` (0.0-1.0) when ``language-code=unknown`` only;
+  this is language-detection confidence, not word-level STT confidence.
 
 Normalization rules:
 - 0.0-1.0 float  → multiply by 100

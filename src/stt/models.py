@@ -8,6 +8,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from src.stt.constants import DEFAULT_STT_PROVIDERS
+
 
 class SelectionMode(str, Enum):
     AUTO = "auto"
@@ -121,7 +123,7 @@ class SttSessionConfig(BaseModel):
     """Client configuration for a streaming STT session."""
 
     enabled_providers: list[str] = Field(
-        default_factory=lambda: ["deepgram", "azure", "openai", "google", "aws"]
+        default_factory=lambda: list(DEFAULT_STT_PROVIDERS)
     )
     selection_mode: SelectionMode = SelectionMode.AUTO
     manual_provider: Optional[str] = None

@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.auth.dependencies import get_current_user
 from src.db.mongodb import col_recordings, get_db
 from src.stt.audio_source import resolve_stt_audio_source
-from src.stt.language_detection import detect_language_from_audio_url, effective_stt_language
+from src.stt.constants import DEFAULT_STT_PROVIDERS
+from src.stt.language_detection import detect_language_from_audio_url, effective_stt_language, provider_language
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,12 @@ async def inspect_stt_pipeline(
         "language_detection": detection.to_dict(),
         "stt_language": stt_language,
         "provider_language_mapping": {
-            provider: stt_language if stt_language != "auto" else "auto-detect"
-            for provider in ["deepgram", "azure", "openai", "google", "aws"]
+            provider: (
+                "auto-detect"
+                if stt_language == "auto"
+                else provider_language(provider, stt_language)
+            )
+            for provider in DEFAULT_STT_PROVIDERS
         },
         "config": {
             "whisper_lid_model": os.getenv("WHISPER_LID_MODEL", "small"),

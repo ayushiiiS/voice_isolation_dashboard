@@ -111,8 +111,9 @@ def test_list_providers(client, auth_headers):
     response = client.get("/stt/providers", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
-    assert len(data["providers"]) == 5
-    assert any(p["id"] == "deepgram" for p in data["providers"])
+    assert len(data["providers"]) == 3
+    ids = {p["id"] for p in data["providers"]}
+    assert ids == {"deepgram", "azure", "sarvam"}
 
 
 def test_create_session_requires_recording_id(client, auth_headers):

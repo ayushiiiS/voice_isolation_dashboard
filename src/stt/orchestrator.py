@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 SnapshotCallback = Callable[[SttSessionSnapshot], Awaitable[None]]
 
 
+def _effective_transcript(state: ProviderState) -> str:
+    """Prefer final transcript; fall back to partial for live scoring."""
+    return (state.final_transcript or state.partial_transcript or "").strip()
+
+
 class MultiProviderOrchestrator:
     """Stream audio to all enabled providers and manage selection."""
 
@@ -192,9 +197,9 @@ class MultiProviderOrchestrator:
 
     def _build_snapshot_fields(self, providers: list[ProviderState]) -> dict:
         raw_transcripts = {
-            p.provider: (p.final_transcript or "").strip()
+            p.provider: transcript
             for p in providers
-            if (p.final_transcript or "").strip()
+            if (transcript := _effective_transcript(p))
         }
         max_words = max((len(t.split()) for t in raw_transcripts.values()), default=0)
 

@@ -31,4 +31,4 @@ def test_provider_supports_confidence():
     assert provider_supports_confidence("azure") is True
     assert provider_supports_confidence("openai") is False
     assert provider_supports_confidence("google") is False
-    assert provider_supports_confidence("aws") is False
+    assert provider_supports_confidence("sarvam") is True
