@@ -14,6 +14,7 @@ class SentimentLabel(str, Enum):
     NEGATIVE = "negative"
 
 
+
 class TranscriptEntry(BaseModel):
     speaker: str
     role: str

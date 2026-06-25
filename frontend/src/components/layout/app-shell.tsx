@@ -28,7 +28,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-screen w-[260px] shrink-0 flex-col border-r border-border/60 bg-[#0a0f1a]">
+    <aside className="sticky top-0 flex h-screen w-[260px] shrink-0 flex-col border-r border-border/60 bg-[#0a0f1a]">
       <div className="flex items-center gap-3 border-b border-border/60 px-5 py-5">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/30 to-violet-500/20 text-primary ring-1 ring-indigo-500/20">
           <Mic2 className="h-5 w-5" />
@@ -92,9 +92,9 @@ export function AppShell({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar />
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <header className="sticky top-0 z-10 border-b border-border/60 bg-background/90 px-6 py-5 backdrop-blur-md">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>

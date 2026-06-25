@@ -19,7 +19,7 @@ services:
       - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - CORS_ORIGINS=http://localhost:3000
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
     volumes:
       - ./output:/app/output
       - ./secrets:/app/secrets:ro
