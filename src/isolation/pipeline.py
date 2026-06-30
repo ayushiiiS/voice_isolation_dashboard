@@ -15,7 +15,7 @@ from src.diarization.models import (
     IsolationMetadata,
 )
 from src.diarization.pyannote_service import PyannoteDiarizationService
-from src.isolation.audio_extractor import AudioExtractor
+from src.isolation.audio_extractor import AudioExtractor, isolation_mode
 from src.isolation.speaker_selector import SpeakerSelector
 
 logger = logging.getLogger(__name__)
@@ -81,8 +81,14 @@ class VoiceIsolationPipeline:
             from src.isolation.audio_extractor import filter_micro_segments
 
             identification_segments = filter_micro_segments(diarization_result.segments)
-            extraction_segments = filter_micro_segments(
+            partition_segments = identification_segments
+            compressed_segments = filter_micro_segments(
                 overlap_segments or diarization_result.segments
+            )
+            mask_segments = (
+                partition_segments
+                if isolation_mode() == "partition"
+                else compressed_segments
             )
 
             diarization_json_path = out_dir / "diarization.json"
@@ -105,18 +111,13 @@ class VoiceIsolationPipeline:
             report("identifying_speakers", 1.0)
 
             report("extracting_human_audio", 0.0)
-            human_audio, human_segments, agent_segments = (
-                self.audio_extractor.extract_human_segments(
+            human_audio, agent_audio, human_segments, agent_segments = (
+                self.audio_extractor.extract_isolated_tracks(
                     audio=audio,
-                    segments=extraction_segments,
+                    segments=mask_segments,
                     human_speaker=identification.human_speaker,
                     agent_speaker=identification.agent_speaker,
                 )
-            )
-            agent_audio, _ = self.audio_extractor.extract_speaker_segments(
-                audio=audio,
-                segments=extraction_segments,
-                speaker_id=identification.agent_speaker,
             )
             report("extracting_human_audio", 1.0)
 
@@ -131,6 +132,13 @@ class VoiceIsolationPipeline:
 
             duration_user_only = self.audio_extractor.duration_seconds(human_audio)
             duration_agent_only = self.audio_extractor.duration_seconds(agent_audio)
+            logger.info(
+                "Isolation mode=%s | exported durations original=%.1fs user=%.1fs agent=%.1fs",
+                isolation_mode(),
+                duration_original,
+                duration_user_only,
+                duration_agent_only,
+            )
 
             metadata = IsolationMetadata(
                 human_speaker=identification.human_speaker,

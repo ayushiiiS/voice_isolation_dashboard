@@ -74,3 +74,43 @@ def test_supported_extensions():
     assert ".mp3" in SUPPORTED_EXTENSIONS
     assert ".m4a" in SUPPORTED_EXTENSIONS
     assert ".ogg" in SUPPORTED_EXTENSIONS
+
+
+def test_partition_durations_sum_to_original():
+    from pydub.generators import Sine
+
+    audio = Sine(440).to_audio_segment(duration=10000)
+    segments = [
+        SpeakerSegment(speaker="SPEAKER_01", start=1.0, end=3.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=5.0, end=7.0),
+    ]
+    extractor = AudioExtractor()
+    user_audio, agent_audio, _, _ = extractor.extract_partition_tracks(
+        audio,
+        segments,
+        human_speaker="SPEAKER_01",
+        agent_speaker="SPEAKER_00",
+    )
+
+    assert len(user_audio) + len(agent_audio) == len(audio)
+
+
+def test_partition_silence_goes_to_user():
+    from pydub.generators import Sine
+
+    audio = Sine(220).to_audio_segment(duration=5000)
+    segments = [
+        SpeakerSegment(speaker="SPEAKER_00", start=1.0, end=2.0),
+    ]
+    extractor = AudioExtractor()
+    user_audio, agent_audio, _, _ = extractor.extract_partition_tracks(
+        audio,
+        segments,
+        human_speaker="SPEAKER_01",
+        agent_speaker="SPEAKER_00",
+    )
+
+    # 1s agent speech + 4s silence/user regions on user track
+    assert len(agent_audio) == 1000
+    assert len(user_audio) == 4000
+    assert len(user_audio) + len(agent_audio) == len(audio)

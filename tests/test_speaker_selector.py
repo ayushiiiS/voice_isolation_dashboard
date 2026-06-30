@@ -97,6 +97,24 @@ def test_identify_from_real_diarization_fixture():
     assert result.agent_speaker == "SPEAKER_01"
 
 
+def test_agent_led_dominant_talk_time():
+    """Agent speaks more with longer segments; user has more short acks."""
+    segments = [
+        SpeakerSegment(speaker="SPEAKER_00", start=1.0, end=1.3),
+        SpeakerSegment(speaker="SPEAKER_01", start=1.3, end=6.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=7.0, end=7.4),
+        SpeakerSegment(speaker="SPEAKER_01", start=8.0, end=14.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=15.0, end=15.5),
+        SpeakerSegment(speaker="SPEAKER_01", start=16.0, end=22.0),
+    ]
+
+    selector = SpeakerSelector()
+    result = selector.identify(segments)
+
+    assert result.human_speaker == "SPEAKER_00"
+    assert result.agent_speaker == "SPEAKER_01"
+
+
 def test_raises_on_single_speaker():
     segments = [SpeakerSegment(speaker="SPEAKER_00", start=0.0, end=5.0)]
 

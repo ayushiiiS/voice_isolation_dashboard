@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 SHORT_UTTERANCE_SEC = float(os.getenv("ISOLATION_SHORT_UTTERANCE_SEC", "0.8"))
 LONG_UTTERANCE_SEC = float(os.getenv("ISOLATION_LONG_UTTERANCE_SEC", "2.0"))
 BACKCHANNEL_SHORT_RATIO = float(os.getenv("ISOLATION_BACKCHANNEL_RATIO", "0.45"))
+AGENT_LED_SHORT_GAP = float(os.getenv("ISOLATION_AGENT_LED_SHORT_GAP", "0.08"))
+AGENT_LED_AVG_SEG_RATIO = float(os.getenv("ISOLATION_AGENT_LED_AVG_SEG_RATIO", "1.25"))
+USER_LED_DURATION_RATIO = float(os.getenv("ISOLATION_USER_LED_DURATION_RATIO", "1.25"))
+
+
+def _optional_speaker_override() -> tuple[str | None, str | None]:
+    """Optional .env overrides: ISOLATION_HUMAN_SPEAKER / ISOLATION_AGENT_SPEAKER."""
+    human = os.getenv("ISOLATION_HUMAN_SPEAKER", "").strip()
+    agent = os.getenv("ISOLATION_AGENT_SPEAKER", "").strip()
+    return human or None, agent or None
 
 
 class SpeakerSelector:
@@ -47,6 +57,21 @@ class SpeakerSelector:
             speakers = self._top_speakers_by_duration(segments, limit=2)
 
         stats = self._compute_speaker_stats(segments, speakers)
+
+        forced_human, forced_agent = _optional_speaker_override()
+        if forced_human and forced_agent and forced_human in speakers and forced_agent in speakers:
+            logger.info(
+                "Using forced speaker mapping from env: human=%s agent=%s",
+                forced_human,
+                forced_agent,
+            )
+            return SpeakerIdentification(
+                human_speaker=forced_human,
+                agent_speaker=forced_agent,
+                confidence=1.0,
+                strategy=IdentificationStrategy.HEURISTICS,
+                speaker_stats={k: v for k, v in stats.items() if not k.startswith("_")},
+            )
 
         transcript_entries = self._normalize_transcript(agent_transcript)
 
@@ -199,6 +224,7 @@ class SpeakerSelector:
         user_candidate = max(short_ratios, key=short_ratios.get)
         agent_candidate = min(short_ratios, key=short_ratios.get)
         ratio_gap = short_ratios[user_candidate] - short_ratios[agent_candidate]
+        dur_total = sum(durations.values()) or 1.0
 
         if (
             short_ratios[user_candidate] >= BACKCHANNEL_SHORT_RATIO
@@ -207,31 +233,70 @@ class SpeakerSelector:
             human_speaker = user_candidate
             agent_speaker = agent_candidate
             confidence = min(0.70 + ratio_gap * 0.5, 0.92)
-            strategy = IdentificationStrategy.HEURISTICS
             logger.info(
-                "Backchannel pattern detected: user=%s (%.0f%% short segs)",
+                "Backchannel pattern: user=%s (%.0f%% short segs)",
                 human_speaker,
                 short_ratios[user_candidate] * 100,
             )
-        elif durations:
-            human_speaker = max(durations, key=durations.get)
-            agent_speaker = min(durations, key=durations.get)
-            dur_total = sum(durations.values()) or 1.0
-            dur_gap = abs(durations[human_speaker] - durations[agent_speaker]) / dur_total
-            confidence = min(0.60 + dur_gap * 0.4, 0.85)
-            strategy = IdentificationStrategy.HEURISTICS
-            logger.info(
-                "Talk-time pattern: user=%s (%.1fs vs agent %.1fs)",
-                human_speaker,
-                durations[human_speaker],
-                durations[agent_speaker],
-            )
+        elif durations and len(speakers) == 2:
+            longer = max(durations, key=durations.get)
+            shorter = min(durations, key=durations.get)
+            dur_gap = abs(durations[longer] - durations[shorter]) / dur_total
+            short_gap = short_ratios[shorter] - short_ratios[longer]
+            avg_longer = stats[longer].get("avg_segment_duration", 0.0)
+            avg_shorter = stats[shorter].get("avg_segment_duration", 0.0)
+
+            if (
+                dur_gap >= 0.12
+                and short_gap >= AGENT_LED_SHORT_GAP
+                and avg_longer > avg_shorter * AGENT_LED_AVG_SEG_RATIO
+            ):
+                # Agent-led: long monologues + shorter backchannels on the other side.
+                agent_speaker = longer
+                human_speaker = shorter
+                confidence = min(0.68 + dur_gap * 0.35 + short_gap * 0.4, 0.90)
+                logger.info(
+                    "Agent-led pattern: agent=%s (%.1fs, avg %.1fs) user=%s "
+                    "(%.1fs, %.0f%% short)",
+                    agent_speaker,
+                    durations[longer],
+                    avg_longer,
+                    human_speaker,
+                    durations[shorter],
+                    short_ratios[shorter] * 100,
+                )
+            elif durations[longer] >= durations[shorter] * USER_LED_DURATION_RATIO:
+                human_speaker = longer
+                agent_speaker = shorter
+                confidence = min(0.60 + dur_gap * 0.4, 0.85)
+                logger.info(
+                    "User-led pattern: user=%s (%.1fs vs agent %.1fs)",
+                    human_speaker,
+                    durations[human_speaker],
+                    durations[agent_speaker],
+                )
+            else:
+                scores = self._score_agent_likelihood(segments, speakers, stats, transcript)
+                agent_speaker = max(scores, key=scores.get)
+                human_speaker = [s for s in speakers if s != agent_speaker][0]
+                confidence = 0.55
+                logger.info(
+                    "Ambiguous call pattern; fallback scores → agent=%s user=%s",
+                    agent_speaker,
+                    human_speaker,
+                )
         else:
             scores = self._score_agent_likelihood(segments, speakers, stats, transcript)
             agent_speaker = max(scores, key=scores.get)
             human_speaker = [s for s in speakers if s != agent_speaker][0]
             confidence = 0.55
             strategy = IdentificationStrategy.HEURISTICS
+
+        strategy = IdentificationStrategy.HEURISTICS
+
+        if os.getenv("ISOLATION_SWAP_SPEAKERS", "false").lower() == "true":
+            logger.warning("ISOLATION_SWAP_SPEAKERS=true — swapping human/agent labels")
+            human_speaker, agent_speaker = agent_speaker, human_speaker
 
         return SpeakerIdentification(
             human_speaker=human_speaker,

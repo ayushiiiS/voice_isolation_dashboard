@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -25,6 +25,23 @@ SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac"}
 DIARIZATION_SAMPLE_RATE = 48000
 # Compressed formats decode faster and more reliably via ffmpeg than pydub.
 FFMPEG_DECODE_FORMATS = {"ogg", "mp3", "m4a", "aac", "flac", "opus"}
+
+IsolationMode = Literal["partition", "compressed"]
+
+
+def isolation_mode() -> IsolationMode:
+    """
+    partition = split original into user (speech+silence) + agent (speech only);
+                user duration + agent duration == original duration.
+    compressed = speech-only clips with gaps removed (legacy).
+    """
+    mode = os.getenv("ISOLATION_MODE", "partition").strip().lower()
+    if mode in {"timeline", "partition"}:
+        return "partition"
+    if mode == "compressed":
+        return "compressed"
+    logger.warning("Unknown ISOLATION_MODE=%s; using partition", mode)
+    return "partition"
 
 
 def _segment_padding_ms() -> int:
@@ -86,6 +103,14 @@ def merge_adjacent_segments(
             merged.append(segment)
 
     return merged
+
+
+def _concat_parts(parts: list[AudioSegment]) -> AudioSegment:
+    combined = AudioSegment.empty()
+    for part in parts:
+        if len(part) > 0:
+            combined += part
+    return combined
 
 
 class AudioExtractor:
@@ -289,6 +314,110 @@ class AudioExtractor:
         )
 
         return human_audio, human_segments, agent_segments
+
+    def extract_partition_tracks(
+        self,
+        audio: AudioSegment,
+        segments: list[SpeakerSegment],
+        human_speaker: str,
+        agent_speaker: str,
+    ) -> tuple[AudioSegment, AudioSegment, list[SpeakerSegment], list[SpeakerSegment]]:
+        """
+        Partition the original recording into user and agent streams.
+
+        Walks the call chronologically: silence and user speech go to the user
+        track; agent speech goes to the agent track. No audio is dropped, so
+        len(user) + len(agent) == len(original).
+        """
+        audio_duration_ms = len(audio)
+        human_segments = merge_adjacent_segments(
+            [s for s in segments if s.speaker == human_speaker]
+        )
+        agent_segments = merge_adjacent_segments(
+            [s for s in segments if s.speaker == agent_speaker]
+        )
+
+        labeled = sorted(
+            [s for s in segments if s.speaker in {human_speaker, agent_speaker}],
+            key=lambda s: (s.start, s.end),
+        )
+
+        user_parts: list[AudioSegment] = []
+        agent_parts: list[AudioSegment] = []
+        cursor_ms = 0
+
+        for seg in labeled:
+            start_ms = max(0, int(seg.start * 1000))
+            end_ms = min(audio_duration_ms, int(seg.end * 1000))
+            if end_ms <= start_ms:
+                continue
+            if end_ms <= cursor_ms:
+                continue
+            start_ms = max(start_ms, cursor_ms)
+
+            if start_ms > cursor_ms:
+                user_parts.append(audio[cursor_ms:start_ms])
+
+            chunk = audio[start_ms:end_ms]
+            if seg.speaker == human_speaker:
+                user_parts.append(chunk)
+            else:
+                agent_parts.append(chunk)
+
+            cursor_ms = max(cursor_ms, end_ms)
+
+        if cursor_ms < audio_duration_ms:
+            user_parts.append(audio[cursor_ms:audio_duration_ms])
+
+        user_audio = _concat_parts(user_parts)
+        agent_audio = _concat_parts(agent_parts)
+
+        total_ms = len(user_audio) + len(agent_audio)
+        if abs(total_ms - audio_duration_ms) > 1:
+            logger.warning(
+                "Partition duration mismatch: user=%dms + agent=%dms != original=%dms",
+                len(user_audio),
+                len(agent_audio),
+                audio_duration_ms,
+            )
+        else:
+            logger.info(
+                "Partition tracks: user=%.1fs + agent=%.1fs = original=%.1fs",
+                len(user_audio) / 1000.0,
+                len(agent_audio) / 1000.0,
+                audio_duration_ms / 1000.0,
+            )
+
+        return user_audio, agent_audio, human_segments, agent_segments
+
+    def extract_isolated_tracks(
+        self,
+        audio: AudioSegment,
+        segments: list[SpeakerSegment],
+        human_speaker: str,
+        agent_speaker: str,
+    ) -> tuple[AudioSegment, AudioSegment, list[SpeakerSegment], list[SpeakerSegment]]:
+        """Extract user/agent audio using the configured isolation mode."""
+        if isolation_mode() == "partition":
+            return self.extract_partition_tracks(
+                audio,
+                segments,
+                human_speaker,
+                agent_speaker,
+            )
+
+        human_audio, human_segments, agent_segments = self.extract_human_segments(
+            audio,
+            segments,
+            human_speaker,
+            agent_speaker,
+        )
+        agent_audio, _ = self.extract_speaker_segments(
+            audio,
+            segments,
+            agent_speaker,
+        )
+        return human_audio, agent_audio, human_segments, agent_segments
 
     def export_wav(self, audio: AudioSegment, output_path: Path) -> Path:
         """Export audio segment to high-quality mono WAV for playback."""
