@@ -23,7 +23,7 @@ from src.diarization.pyannote_service import PyannoteDiarizationService
 from src.isolation.pipeline import VoiceIsolationPipeline
 from src.reports.generator import ReportGenerator
 from src.services.storage_handler import upload_outputs_with_fallback
-from src.services.storage_urls import persist_processed_outputs
+from src.services.storage_urls import local_media_url, persist_processed_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,7 @@ class JobProcessor:
             report("complete", 1.0, "Processing complete")
 
             file_name = recording_filename(recording_url)
+            original_audio_url = local_media_url(recording_id, "original.wav")
 
             return {
                 "recording_id": recording_id,
@@ -125,7 +126,7 @@ class JobProcessor:
                 "recording_url": recording_url,
                 "user_audio_url": urls["user_audio_url"],
                 "agent_audio_url": urls["agent_audio_url"],
-                "original_audio_url": recording_url,
+                "original_audio_url": original_audio_url,
                 "storage_type": urls["storage_type"],
                 "storage_uri": urls["storage_uri"],
                 "upload_status": urls["upload_status"],

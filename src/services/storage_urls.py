@@ -24,7 +24,13 @@ def persist_processed_outputs(work_path: Path, recording_id: str) -> Path:
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    for name in ("user_only.wav", "agent_only.wav", "diarization.json", "diarization.rttm"):
+    for name in (
+        "original.wav",
+        "user_only.wav",
+        "agent_only.wav",
+        "diarization.json",
+        "diarization.rttm",
+    ):
         src = work_path / name
         if src.is_file():
             shutil.copy2(src, dest / name)

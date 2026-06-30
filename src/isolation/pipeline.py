@@ -71,12 +71,19 @@ class VoiceIsolationPipeline:
             temp_paths.append((diarization_path, is_diarization_temp))
 
             report("diarizing", 0.0)
-            diarization_result, raw_output = self.diarization_service.diarize(
+            diarization_result, raw_output, overlap_segments = self.diarization_service.diarize(
                 str(diarization_path),
                 num_speakers=num_speakers,
                 progress_callback=progress_callback,
             )
             report("diarizing", 1.0)
+
+            from src.isolation.audio_extractor import filter_micro_segments
+
+            identification_segments = filter_micro_segments(diarization_result.segments)
+            extraction_segments = filter_micro_segments(
+                overlap_segments or diarization_result.segments
+            )
 
             diarization_json_path = out_dir / "diarization.json"
             diarization_rttm_path = out_dir / "diarization.rttm"
@@ -90,7 +97,7 @@ class VoiceIsolationPipeline:
                 raw_output, diarization_result.speakers
             )
             identification = self.speaker_selector.identify(
-                segments=diarization_result.segments,
+                segments=identification_segments,
                 agent_transcript=agent_transcript,
                 agent_reference_audio_path=agent_reference_audio_path,
                 speaker_embeddings=speaker_embeddings,
@@ -101,22 +108,24 @@ class VoiceIsolationPipeline:
             human_audio, human_segments, agent_segments = (
                 self.audio_extractor.extract_human_segments(
                     audio=audio,
-                    segments=diarization_result.segments,
+                    segments=extraction_segments,
                     human_speaker=identification.human_speaker,
                     agent_speaker=identification.agent_speaker,
                 )
             )
             agent_audio, _ = self.audio_extractor.extract_speaker_segments(
                 audio=audio,
-                segments=diarization_result.segments,
+                segments=extraction_segments,
                 speaker_id=identification.agent_speaker,
             )
             report("extracting_human_audio", 1.0)
 
             report("exporting", 0.0)
+            original_path = out_dir / "original.wav"
             isolated_path = out_dir / "user_only.wav"
             agent_path = out_dir / "agent_only.wav"
-            self.audio_extractor.export_user_stt_wav(human_audio, isolated_path)
+            self.audio_extractor.export_playback_wav(audio, original_path)
+            self.audio_extractor.export_wav(human_audio, isolated_path)
             self.audio_extractor.export_wav(agent_audio, agent_path)
             report("exporting", 1.0)
 

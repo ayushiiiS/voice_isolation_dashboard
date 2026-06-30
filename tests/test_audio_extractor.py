@@ -56,7 +56,21 @@ def test_unsupported_extension_raises(temp_dir: Path):
         extractor.load_audio(str(bad_file))
 
 
+def test_merge_adjacent_segments(two_speaker_segments):
+    from src.isolation.audio_extractor import merge_adjacent_segments
+
+    segments = [
+        two_speaker_segments[1],
+        SpeakerSegment(speaker="SPEAKER_01", start=4.6, end=5.0),
+    ]
+    merged = merge_adjacent_segments(segments, max_gap_seconds=0.5)
+    assert len(merged) == 1
+    assert merged[0].start == 2.2
+    assert merged[0].end == 5.0
+
+
 def test_supported_extensions():
     assert ".wav" in SUPPORTED_EXTENSIONS
     assert ".mp3" in SUPPORTED_EXTENSIONS
     assert ".m4a" in SUPPORTED_EXTENSIONS
+    assert ".ogg" in SUPPORTED_EXTENSIONS

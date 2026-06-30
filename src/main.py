@@ -116,7 +116,7 @@ async def root() -> dict:
         "version": "2.0.0",
         "endpoints": {
             "auth": "/auth/register, /auth/login",
-            "upload": "POST /upload/url, POST /upload/csv",
+            "upload": "POST /upload/url, POST /upload/csv, POST /upload/file",
             "jobs": "GET /jobs, GET /jobs/{id}",
             "analytics": "GET /analytics/{id}",
             "reports": "GET /reports/{id}",

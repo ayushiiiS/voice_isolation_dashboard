@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,50 @@ RECORDING_BASENAMES = ("recording.ogg", "recording.wav", "recording.m4a", "recor
 def is_bluemachines_console_url(url: str) -> bool:
     parsed = urlparse(url.strip())
     return parsed.netloc.lower() in BLUEMACHINES_CONSOLE_HOSTS
+
+
+def is_local_recording_path(path: str) -> bool:
+    """Return True for server-local uploaded recordings (absolute path or file:// URI)."""
+    cleaned = path.strip()
+    if cleaned.startswith("file://"):
+        return True
+    candidate = Path(cleaned)
+    if not candidate.is_absolute():
+        return False
+    ext = candidate.suffix.lower()
+    return ext in (".ogg", ".wav", ".mp3", ".m4a", ".flac", ".aac", ".oga")
+
+
+def local_recording_path(path: str) -> Path:
+    """Resolve a local recording reference to an absolute filesystem path."""
+    cleaned = path.strip()
+    if cleaned.startswith("file://"):
+        from urllib.request import url2pathname
+
+        parsed = urlparse(cleaned)
+        local = Path(url2pathname(parsed.path))
+        if not local.is_absolute() and parsed.netloc:
+            local = Path(f"/{parsed.netloc}{parsed.path}")
+        local = local.resolve()
+    else:
+        local = Path(cleaned).resolve()
+
+    if not local.exists():
+        raise FileNotFoundError(f"Local recording not found: {path}")
+    if local.suffix.lower() not in (
+        ".ogg",
+        ".wav",
+        ".mp3",
+        ".m4a",
+        ".flac",
+        ".aac",
+        ".oga",
+    ):
+        raise ValueError(
+            f"Unsupported local audio format: {local.suffix or '(none)'}. "
+            "Use OGG, WAV, MP3, M4A, FLAC, or AAC."
+        )
+    return local
 
 
 def is_direct_audio_url(url: str) -> bool:
@@ -126,7 +171,7 @@ def resolve_bluemachines_console_url(url: str) -> str:
 
 def resolve_recording_url(url: str) -> str:
     """
-    Normalize any supported recording reference to a direct gs:// or https:// URL.
+    Normalize any supported recording reference to a direct gs://, https://, or local path.
     """
     cleaned = url.strip()
     if not cleaned:
@@ -134,6 +179,9 @@ def resolve_recording_url(url: str) -> str:
 
     if is_bluemachines_console_url(cleaned):
         return resolve_bluemachines_console_url(cleaned)
+
+    if is_local_recording_path(cleaned):
+        return str(local_recording_path(cleaned))
 
     if is_direct_audio_url(cleaned):
         return cleaned
@@ -144,12 +192,18 @@ def resolve_recording_url(url: str) -> str:
 
     raise ValueError(
         "Unsupported recording URL. Use a direct audio link (https://, gs://), "
-        "or a Blue Machines console interaction URL."
+        "an uploaded audio file, or a Blue Machines console interaction URL."
     )
 
 
 def recording_display_name(url: str) -> str:
     """Human-readable name from URL."""
+    if is_local_recording_path(url):
+        try:
+            return local_recording_path(url).name
+        except (FileNotFoundError, ValueError):
+            return Path(url).name or "recording.ogg"
+
     if is_bluemachines_console_url(url):
         _, conversation_id = _parse_console_params(url)
         if conversation_id:

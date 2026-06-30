@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { AuthGuard } from "@/components/layout/auth-guard";
 import { AppShell } from "@/components/layout/app-shell";
 import { CsvUpload } from "@/components/upload/csv-upload";
+import { AudioUpload } from "@/components/upload/audio-upload";
 import { UrlUpload } from "@/components/upload/url-upload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Clock, FileSpreadsheet, Link2, Zap } from "lucide-react";
+import { ArrowLeft, Clock, FileSpreadsheet, Link2, Mic2, Zap } from "lucide-react";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -17,7 +18,7 @@ export default function UploadPage() {
     <AuthGuard>
       <AppShell
         title="Upload Recordings"
-        subtitle="Process single URLs or batch CSV uploads"
+        subtitle="Upload audio files, paste URLs, or batch CSV uploads"
         actions={
           <Button variant="outline" size="sm" onClick={() => router.push("/dashboard")}>
             <ArrowLeft className="h-4 w-4" />
@@ -26,8 +27,13 @@ export default function UploadPage() {
         }
       >
         <div className="mx-auto max-w-5xl space-y-8">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
+              {
+                icon: Mic2,
+                title: "Audio file",
+                desc: "OGG, WAV, MP3, and more",
+              },
               {
                 icon: Link2,
                 title: "Single URL",
@@ -72,8 +78,11 @@ export default function UploadPage() {
           </Card>
 
           <div className="grid gap-6 lg:grid-cols-2">
+            <AudioUpload />
             <UrlUpload />
-            <CsvUpload />
+            <div className="lg:col-span-2">
+              <CsvUpload />
+            </div>
           </div>
         </div>
       </AppShell>

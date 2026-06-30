@@ -16,6 +16,7 @@ PROCESSED_DIR = Path(os.getenv("PROCESSED_DIR", "output/processed"))
 @router.get("/{recording_id}/{filename}")
 async def get_processed_file(recording_id: str, filename: str) -> FileResponse:
     allowed = {
+        "original.wav",
         "user_only.wav",
         "agent_only.wav",
         "diarization.json",

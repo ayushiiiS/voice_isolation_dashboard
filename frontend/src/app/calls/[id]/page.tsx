@@ -180,11 +180,10 @@ export default function CallDetailsPage() {
                   </CardHeader>
                   <CardContent>
                     <AudioPlayerGroup
-                      originalUrl={
-                        data.recording.original_audio_url || data.recording.recording_url
-                      }
+                      originalUrl={data.recording.original_audio_url}
                       userUrl={data.recording.user_audio_url}
                       agentUrl={data.recording.agent_audio_url}
+                      fileBaseName={data.recording.file_name}
                     />
                   </CardContent>
                 </Card>

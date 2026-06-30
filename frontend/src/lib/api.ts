@@ -99,6 +99,12 @@ export const api = {
     return request<UploadResponse>("/upload/csv", { method: "POST", body: form }, token);
   },
 
+  uploadAudio: (token: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<UploadResponse>("/upload/file", { method: "POST", body: form }, token);
+  },
+
   analytics: (token: string, recordingId: string) =>
     request<AnalyticsResponse>(`/analytics/${recordingId}`, {}, token),
 

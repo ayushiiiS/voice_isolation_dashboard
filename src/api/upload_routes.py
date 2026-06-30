@@ -6,6 +6,7 @@ import csv
 import io
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 from bson import ObjectId
@@ -14,12 +15,22 @@ from pydantic import BaseModel, field_validator
 
 from src.auth.dependencies import get_current_user
 from src.db.mongodb import col_jobs, col_recordings, get_db
+from src.isolation.audio_extractor import SUPPORTED_EXTENSIONS
 from src.services.job_processor import JobProcessor, new_recording_id, persist_job_result, recording_filename
+from src.utils.audio_validation import validate_downloaded_audio
 from src.utils.recording_url_resolver import is_bluemachines_console_url, is_direct_audio_url
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 _processor = JobProcessor()
+
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
+UPLOAD_DIR = Path(
+    os.getenv(
+        "UPLOAD_DIR",
+        str(Path(os.getenv("WORK_DIR", "output/.work")) / "uploads"),
+    )
+)
 
 
 class UrlUploadRequest(BaseModel):
@@ -60,13 +71,18 @@ async def _create_job(
     urls: list[str],
     source: str,
     file_name: str | None = None,
+    recording_ids: list[str] | None = None,
 ) -> dict:
     now = datetime.now(timezone.utc)
     job_id = str(ObjectId())
 
     recording_docs = []
-    for url in urls:
-        rec_id = new_recording_id()
+    for index, url in enumerate(urls):
+        rec_id = (
+            recording_ids[index]
+            if recording_ids and index < len(recording_ids)
+            else new_recording_id()
+        )
         name = file_name or recording_filename(url)
         recording_docs.append(
             {
@@ -140,17 +156,34 @@ async def _run_job_in_background(
     job_id: str, user_id: str, recording_id: str, url: str
 ) -> None:
     import asyncio
+    import logging
 
+    logger = logging.getLogger(__name__)
     db = await get_db()
     job = await col_jobs(db).find_one({"_id": ObjectId(job_id)})
     if not job:
         return
     job["id"] = job_id
 
-    result = await asyncio.to_thread(
-        _processor.process_recording, url, job_id, recording_id
-    )
-    await persist_job_result(db, user_id, job, result)
+    try:
+        result = await asyncio.to_thread(
+            _processor.process_recording, url, job_id, recording_id
+        )
+        await persist_job_result(db, user_id, job, result)
+    except Exception as exc:
+        logger.exception("Background job failed for recording %s", recording_id)
+        await persist_job_result(
+            db,
+            user_id,
+            job,
+            {
+                "recording_id": recording_id,
+                "job_id": job_id,
+                "recording_url": url,
+                "status": "failed",
+                "error": str(exc),
+            },
+        )
 
 
 @router.post("/url", response_model=UploadResponse)
@@ -217,4 +250,84 @@ async def upload_csv(
         job_id=job_info["id"],
         message=f"Batch upload queued: {len(urls)} recordings",
         total_recordings=len(urls),
+    )
+
+
+def _safe_upload_filename(filename: str) -> str:
+    name = Path(filename).name.strip()
+    if not name or name in {".", ".."}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid filename",
+        )
+    return name
+
+
+@router.post("/file", response_model=UploadResponse)
+async def upload_audio_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+) -> UploadResponse:
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing filename",
+        )
+
+    safe_name = _safe_upload_filename(file.filename)
+    ext = Path(safe_name).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        allowed = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported audio format '{ext or '(none)'}'. Allowed: {allowed}",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty",
+        )
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds maximum upload size ({MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+        )
+
+    rec_id = new_recording_id()
+    dest_dir = UPLOAD_DIR / rec_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / safe_name
+
+    try:
+        dest.write_bytes(content)
+        validate_downloaded_audio(dest)
+    except ValueError as exc:
+        if dest.exists():
+            dest.unlink()
+        if dest_dir.exists() and not any(dest_dir.iterdir()):
+            dest_dir.rmdir()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    local_path = str(dest.resolve())
+    job_info = await _create_job(
+        db,
+        current_user["id"],
+        [local_path],
+        source="file",
+        file_name=safe_name,
+        recording_ids=[rec_id],
+    )
+    await _process_job_background(db, current_user["id"], job_info, background_tasks)
+
+    return UploadResponse(
+        job_id=job_info["id"],
+        message="Recording queued for processing",
+        total_recordings=1,
     )

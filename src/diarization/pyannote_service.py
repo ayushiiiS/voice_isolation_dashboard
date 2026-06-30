@@ -127,6 +127,10 @@ class PyannoteDiarizationService:
         speakers = sorted({s.speaker for s in segments})
         duration = max((s.end for s in segments), default=0.0)
 
+        overlap_segments: list[SpeakerSegment] = []
+        if use_exclusive and hasattr(output, "speaker_diarization"):
+            overlap_segments = self._annotation_to_segments(output.speaker_diarization)
+
         result = DiarizationResult(
             segments=segments,
             speakers=speakers,
@@ -135,13 +139,14 @@ class PyannoteDiarizationService:
         )
 
         logger.info(
-            "Diarization complete: %d segments, %d speakers, %.1fs duration",
+            "Diarization complete: %d segments (%d overlap), %d speakers, %.1fs duration",
             len(segments),
+            len(overlap_segments),
             len(speakers),
             duration,
         )
 
-        return result, output
+        return result, output, overlap_segments
 
     @staticmethod
     def _annotation_to_segments(annotation) -> list[SpeakerSegment]:

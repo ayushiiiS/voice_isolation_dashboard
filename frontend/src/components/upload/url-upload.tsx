@@ -19,6 +19,9 @@ function normalizeRecordingUrl(raw: string): string {
 function validateRecordingUrl(raw: string): string | null {
   const value = normalizeRecordingUrl(raw);
   if (!value) return "Enter a recording URL";
+  if (value.startsWith("file://")) {
+    return "Local file paths cannot be used here — use Upload Audio File instead";
+  }
   if (value.startsWith("[") || value.startsWith("{")) {
     return "Paste the recording URL only — not an error message or JSON";
   }

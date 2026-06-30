@@ -23,6 +23,69 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac"}
 # pyannote chunks audio at 48 kHz; OGG call recordings are often 44.1 kHz.
 DIARIZATION_SAMPLE_RATE = 48000
+# Compressed formats decode faster and more reliably via ffmpeg than pydub.
+FFMPEG_DECODE_FORMATS = {"ogg", "mp3", "m4a", "aac", "flac", "opus"}
+
+
+def _segment_padding_ms() -> int:
+    return int(os.getenv("ISOLATION_SEGMENT_PADDING_MS", "120"))
+
+
+def _segment_merge_gap_ms() -> int:
+    return int(os.getenv("ISOLATION_MERGE_GAP_MS", "250"))
+
+
+def _segment_crossfade_ms() -> int:
+    return int(os.getenv("ISOLATION_CROSSFADE_MS", "10"))
+
+
+def _min_segment_ms() -> int:
+    return int(os.getenv("ISOLATION_MIN_SEGMENT_MS", "120"))
+
+
+def filter_micro_segments(
+    segments: list[SpeakerSegment],
+    *,
+    min_duration_ms: int | None = None,
+) -> list[SpeakerSegment]:
+    """Drop diarization fragments too short to be real speech."""
+    threshold = (min_duration_ms if min_duration_ms is not None else _min_segment_ms()) / 1000.0
+    kept = [s for s in segments if s.duration >= threshold]
+    dropped = len(segments) - len(kept)
+    if dropped:
+        logger.info("Filtered %d micro-segments (< %.0f ms)", dropped, threshold * 1000)
+    return kept
+
+
+def merge_adjacent_segments(
+    segments: list[SpeakerSegment],
+    *,
+    max_gap_seconds: float | None = None,
+) -> list[SpeakerSegment]:
+    """Merge same-speaker segments separated by brief pauses."""
+    if not segments:
+        return []
+
+    gap = (
+        max_gap_seconds
+        if max_gap_seconds is not None
+        else _segment_merge_gap_ms() / 1000.0
+    )
+    ordered = sorted(segments, key=lambda s: (s.start, s.end))
+    merged: list[SpeakerSegment] = [ordered[0]]
+
+    for segment in ordered[1:]:
+        previous = merged[-1]
+        if segment.speaker == previous.speaker and segment.start - previous.end <= gap:
+            merged[-1] = SpeakerSegment(
+                speaker=previous.speaker,
+                start=previous.start,
+                end=max(previous.end, segment.end),
+            )
+        else:
+            merged.append(segment)
+
+    return merged
 
 
 class AudioExtractor:
@@ -59,6 +122,13 @@ class AudioExtractor:
         local_path = ensure_extension(local_path, fmt)
 
         logger.info("Loading audio from %s (format=%s)", local_path, fmt)
+        if fmt in FFMPEG_DECODE_FORMATS:
+            return self._transcode_via_ffmpeg(
+                local_path,
+                fmt,
+                sample_rate=None,
+                channels=None,
+            )
         try:
             return AudioSegment.from_file(str(local_path), format=fmt)
         except Exception as pydub_exc:
@@ -69,23 +139,16 @@ class AudioExtractor:
             )
             return self._transcode_via_ffmpeg(local_path, fmt)
 
-    @staticmethod
-    def _transcode_via_ffmpeg(source: Path, fmt: str) -> AudioSegment:
-        """Transcode problematic sources to PCM WAV via ffmpeg."""
-        dest = source.with_suffix(".normalized.wav")
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(source),
-        ]
-        if fmt:
-            cmd[4:4] = ["-f", fmt]  # insert after -loglevel error — fix command building
-
-        # Rebuild command cleanly
+    def _transcode_via_ffmpeg(
+        self,
+        source: Path,
+        fmt: str,
+        *,
+        sample_rate: int | None = 44100,
+        channels: int | None = 1,
+    ) -> AudioSegment:
+        """Transcode sources to PCM WAV via ffmpeg."""
+        dest = self.temp_dir / f"decoded_{uuid.uuid4().hex}.wav"
         cmd = [
             "ffmpeg",
             "-y",
@@ -93,9 +156,14 @@ class AudioExtractor:
             "-loglevel",
             "error",
         ]
-        if fmt in {"ogg", "mp3", "m4a", "wav", "flac", "aac"}:
+        if fmt in FFMPEG_DECODE_FORMATS or fmt == "wav":
             cmd.extend(["-f", fmt])
-        cmd.extend(["-i", str(source), "-ac", "1", "-ar", "44100", str(dest)])
+        cmd.extend(["-i", str(source)])
+        if sample_rate is not None:
+            cmd.extend(["-ar", str(sample_rate)])
+        if channels is not None:
+            cmd.extend(["-ac", str(channels)])
+        cmd.append(str(dest))
 
         try:
             result = subprocess.run(
@@ -126,6 +194,19 @@ class AudioExtractor:
         OGG/WebRTC recordings often use 44.1 kHz, which causes pyannote chunk
         alignment errors when decoded directly from the source file.
         """
+        if (
+            audio.frame_rate == DIARIZATION_SAMPLE_RATE
+            and audio.channels == 1
+        ):
+            dest = self.temp_dir / f"normalized_{uuid.uuid4().hex}.wav"
+            audio.export(str(dest), format="wav")
+            logger.info(
+                "Prepared audio for diarization (already %d Hz mono): %s",
+                DIARIZATION_SAMPLE_RATE,
+                dest,
+            )
+            return dest, True
+
         normalized = audio.set_channels(1).set_frame_rate(DIARIZATION_SAMPLE_RATE)
         dest = self.temp_dir / f"normalized_{uuid.uuid4().hex}.wav"
         normalized.export(str(dest), format="wav")
@@ -141,22 +222,34 @@ class AudioExtractor:
         audio: AudioSegment,
         segments: list[SpeakerSegment],
         speaker_id: str,
+        *,
+        padding_ms: int | None = None,
     ) -> tuple[AudioSegment, list[SpeakerSegment]]:
         """Concatenate all segments for a single speaker in chronological order."""
-        speaker_segments = sorted(
-            [s for s in segments if s.speaker == speaker_id],
-            key=lambda s: s.start,
+        pad = _segment_padding_ms() if padding_ms is None else padding_ms
+        speaker_segments = merge_adjacent_segments(
+            [s for s in segments if s.speaker == speaker_id]
         )
+        speaker_segments.sort(key=lambda s: s.start)
 
         if not speaker_segments:
             logger.warning("No segments found for speaker %s", speaker_id)
             return AudioSegment.silent(duration=0), speaker_segments
 
+        audio_duration_ms = len(audio)
+        crossfade = _segment_crossfade_ms()
         combined = AudioSegment.empty()
         for seg in speaker_segments:
-            start_ms = int(seg.start * 1000)
-            end_ms = int(seg.end * 1000)
-            combined += audio[start_ms:end_ms]
+            start_ms = max(0, int(seg.start * 1000) - pad)
+            end_ms = min(audio_duration_ms, int(seg.end * 1000) + pad)
+            if end_ms <= start_ms:
+                continue
+            chunk = audio[start_ms:end_ms]
+            if len(combined) == 0:
+                combined = chunk
+                continue
+            fade = min(crossfade, len(combined) // 2, len(chunk) // 2)
+            combined = combined.append(chunk, crossfade=fade) if fade > 0 else combined + chunk
 
         logger.info(
             "Extracted %d segments for %s (%.1fs)",
@@ -179,12 +272,13 @@ class AudioExtractor:
         Returns:
             Tuple of (concatenated human audio, human segments, agent segments).
         """
-        human_segments = [s for s in segments if s.speaker == human_speaker]
-        agent_segments = [s for s in segments if s.speaker == agent_speaker]
-        human_segments.sort(key=lambda s: s.start)
-
-        human_audio, _ = self.extract_speaker_segments(
-            audio, human_segments, human_speaker
+        human_audio, human_segments = self.extract_speaker_segments(
+            audio,
+            segments,
+            human_speaker,
+        )
+        agent_segments = merge_adjacent_segments(
+            [s for s in segments if s.speaker == agent_speaker]
         )
 
         logger.info(
@@ -197,11 +291,26 @@ class AudioExtractor:
         return human_audio, human_segments, agent_segments
 
     def export_wav(self, audio: AudioSegment, output_path: Path) -> Path:
-        """Export audio segment to WAV format."""
+        """Export audio segment to high-quality mono WAV for playback."""
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        audio.export(str(output_path), format="wav")
-        logger.info("Exported user-only audio to %s", output_path)
+        playback = audio.set_channels(1).set_sample_width(2)
+        playback.export(str(output_path), format="wav")
+        logger.info("Exported audio to %s (%d Hz mono)", output_path, playback.frame_rate)
+        return output_path
+
+    def export_playback_wav(self, audio: AudioSegment, output_path: Path) -> Path:
+        """Export mixed audio preserving native sample rate and channel layout."""
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        playback = audio.set_sample_width(2)
+        playback.export(str(output_path), format="wav")
+        logger.info(
+            "Exported playback audio to %s (%d Hz, %d ch)",
+            output_path,
+            playback.frame_rate,
+            playback.channels,
+        )
         return output_path
 
     def export_user_stt_wav(self, audio: AudioSegment, output_path: Path) -> Path:

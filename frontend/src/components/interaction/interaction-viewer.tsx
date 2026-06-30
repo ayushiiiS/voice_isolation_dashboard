@@ -63,9 +63,10 @@ export function InteractionViewer({ data }: { data: AnalyticsResponse }) {
 
         <div className="space-y-6">
           <AudioPlayerGroup
-            originalUrl={rec.original_audio_url || rec.recording_url}
+            originalUrl={rec.original_audio_url}
             userUrl={rec.user_audio_url}
             agentUrl={rec.agent_audio_url}
+            fileBaseName={rec.file_name}
           />
           <TranscriptView transcript={data.transcript} />
 

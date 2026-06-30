@@ -7,8 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.auth.dependencies import get_current_user
 from src.db.mongodb import col_analytics, col_recordings, get_db
+from src.services.storage_urls import api_base_url, processed_dir
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def resolve_playable_original_url(recording_id: str, rec: dict) -> str | None:
+    """Return a browser-playable URL for the original recording."""
+    local_original = processed_dir() / recording_id / "original.wav"
+    if local_original.is_file():
+        return f"{api_base_url()}/media/{recording_id}/original.wav"
+
+    candidate = rec.get("original_audio_url") or rec.get("recording_url")
+    if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+        return candidate
+    return None
 
 
 @router.get("/{recording_id}")
@@ -39,7 +52,7 @@ async def get_analytics(
             "recording_url": rec.get("recording_url"),
             "user_audio_url": rec.get("user_audio_url"),
             "agent_audio_url": rec.get("agent_audio_url"),
-            "original_audio_url": rec.get("original_audio_url"),
+            "original_audio_url": resolve_playable_original_url(recording_id, rec),
             "status": rec.get("status"),
             "duration_seconds": rec.get("duration_seconds"),
         },
