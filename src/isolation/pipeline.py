@@ -81,15 +81,18 @@ class VoiceIsolationPipeline:
             from src.isolation.audio_extractor import filter_micro_segments
 
             identification_segments = filter_micro_segments(diarization_result.segments)
+            timeline_segments = identification_segments
             partition_segments = identification_segments
             compressed_segments = filter_micro_segments(
                 overlap_segments or diarization_result.segments
             )
-            mask_segments = (
-                partition_segments
-                if isolation_mode() == "partition"
-                else compressed_segments
-            )
+            mode = isolation_mode()
+            if mode == "timeline":
+                mask_segments = timeline_segments
+            elif mode == "partition":
+                mask_segments = partition_segments
+            else:
+                mask_segments = compressed_segments
 
             diarization_json_path = out_dir / "diarization.json"
             diarization_rttm_path = out_dir / "diarization.rttm"
@@ -128,6 +131,23 @@ class VoiceIsolationPipeline:
             self.audio_extractor.export_playback_wav(audio, original_path)
             self.audio_extractor.export_wav(human_audio, isolated_path)
             self.audio_extractor.export_wav(agent_audio, agent_path)
+
+            if isolation_mode() == "timeline":
+                orig_ms = len(audio)
+                user_ms = len(human_audio)
+                agent_ms = len(agent_audio)
+                if max(abs(user_ms - orig_ms), abs(agent_ms - orig_ms)) > 2:
+                    logger.warning(
+                        "Timeline export length mismatch: original=%dms user=%dms agent=%dms",
+                        orig_ms,
+                        user_ms,
+                        agent_ms,
+                    )
+                else:
+                    logger.info(
+                        "Timeline export verified: all tracks %.1fs",
+                        orig_ms / 1000.0,
+                    )
             report("exporting", 1.0)
 
             duration_user_only = self.audio_extractor.duration_seconds(human_audio)

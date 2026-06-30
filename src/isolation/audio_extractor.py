@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
+import numpy as np
 import requests
 from pydub import AudioSegment
 
@@ -26,22 +27,21 @@ DIARIZATION_SAMPLE_RATE = 48000
 # Compressed formats decode faster and more reliably via ffmpeg than pydub.
 FFMPEG_DECODE_FORMATS = {"ogg", "mp3", "m4a", "aac", "flac", "opus"}
 
-IsolationMode = Literal["partition", "compressed"]
+IsolationMode = Literal["timeline", "partition", "compressed"]
 
 
 def isolation_mode() -> IsolationMode:
     """
-    partition = split original into user (speech+silence) + agent (speech only);
-                user duration + agent duration == original duration.
+    timeline = full-length tracks; silence where the other speaker talks;
+               timestamps align with the original recording.
+    partition = chronological split; user duration + agent duration == original.
     compressed = speech-only clips with gaps removed (legacy).
     """
-    mode = os.getenv("ISOLATION_MODE", "partition").strip().lower()
-    if mode in {"timeline", "partition"}:
-        return "partition"
-    if mode == "compressed":
-        return "compressed"
-    logger.warning("Unknown ISOLATION_MODE=%s; using partition", mode)
-    return "partition"
+    mode = os.getenv("ISOLATION_MODE", "timeline").strip().lower()
+    if mode in {"timeline", "partition", "compressed"}:
+        return mode  # type: ignore[return-value]
+    logger.warning("Unknown ISOLATION_MODE=%s; using timeline", mode)
+    return "timeline"
 
 
 def _segment_padding_ms() -> int:
@@ -111,6 +111,37 @@ def _concat_parts(parts: list[AudioSegment]) -> AudioSegment:
         if len(part) > 0:
             combined += part
     return combined
+
+
+def _ms_to_sample(ms: int, frame_rate: int) -> int:
+    return int(ms * frame_rate / 1000)
+
+
+def _mono_int16_samples(audio: AudioSegment) -> tuple[np.ndarray, int]:
+    mono = audio.set_channels(1).set_sample_width(2)
+    return np.array(mono.get_array_of_samples(), dtype=np.int16), mono.frame_rate
+
+
+def _samples_to_audio(samples: np.ndarray, frame_rate: int) -> AudioSegment:
+    clipped = np.clip(samples, -32768, 32767).astype(np.int16)
+    return AudioSegment(
+        data=clipped.tobytes(),
+        sample_width=2,
+        frame_rate=frame_rate,
+        channels=1,
+    )
+
+
+def _segment_sample_range(
+    seg: SpeakerSegment,
+    *,
+    frame_rate: int,
+    audio_duration_ms: int,
+    padding_ms: int,
+) -> tuple[int, int]:
+    start_ms = max(0, int(seg.start * 1000) - padding_ms)
+    end_ms = min(audio_duration_ms, int(seg.end * 1000) + padding_ms)
+    return _ms_to_sample(start_ms, frame_rate), _ms_to_sample(end_ms, frame_rate)
 
 
 class AudioExtractor:
@@ -390,6 +421,75 @@ class AudioExtractor:
 
         return user_audio, agent_audio, human_segments, agent_segments
 
+    def extract_timeline_tracks(
+        self,
+        audio: AudioSegment,
+        segments: list[SpeakerSegment],
+        human_speaker: str,
+        agent_speaker: str,
+        *,
+        padding_ms: int | None = None,
+    ) -> tuple[AudioSegment, AudioSegment, list[SpeakerSegment], list[SpeakerSegment]]:
+        """
+        Build full-length user/agent tracks aligned to the original timeline.
+
+        - Same duration as the original (word timestamps stay valid).
+        - User track: user speech + silence/unlabeled; silent during agent speech.
+        - Agent track: agent speech only; silent elsewhere.
+        """
+        pad = _segment_padding_ms() if padding_ms is None else padding_ms
+        human_segments = merge_adjacent_segments(
+            [s for s in segments if s.speaker == human_speaker]
+        )
+        agent_segments = merge_adjacent_segments(
+            [s for s in segments if s.speaker == agent_speaker]
+        )
+
+        mono, frame_rate = _mono_int16_samples(audio)
+        n_samples = len(mono)
+        audio_duration_ms = len(audio)
+
+        # Default: silence and unlabeled regions belong on the user track.
+        user_samples = mono.copy()
+        agent_samples = np.zeros(n_samples, dtype=np.int16)
+
+        for seg in segments:
+            if seg.speaker not in {human_speaker, agent_speaker}:
+                continue
+            start_idx, end_idx = _segment_sample_range(
+                seg,
+                frame_rate=frame_rate,
+                audio_duration_ms=audio_duration_ms,
+                padding_ms=pad,
+            )
+            if end_idx <= start_idx:
+                continue
+            if seg.speaker == human_speaker:
+                user_samples[start_idx:end_idx] = mono[start_idx:end_idx]
+                agent_samples[start_idx:end_idx] = 0
+            else:
+                user_samples[start_idx:end_idx] = 0
+                agent_samples[start_idx:end_idx] = mono[start_idx:end_idx]
+
+        user_audio = _samples_to_audio(user_samples, frame_rate)
+        agent_audio = _samples_to_audio(agent_samples, frame_rate)
+
+        if abs(len(user_audio) - audio_duration_ms) > 2:
+            logger.warning(
+                "Timeline user track length %dms != original %dms",
+                len(user_audio),
+                audio_duration_ms,
+            )
+
+        logger.info(
+            "Timeline tracks: user=%.1fs agent=%.1fs original=%.1fs (aligned)",
+            len(user_audio) / 1000.0,
+            len(agent_audio) / 1000.0,
+            audio_duration_ms / 1000.0,
+        )
+
+        return user_audio, agent_audio, human_segments, agent_segments
+
     def extract_isolated_tracks(
         self,
         audio: AudioSegment,
@@ -398,7 +498,15 @@ class AudioExtractor:
         agent_speaker: str,
     ) -> tuple[AudioSegment, AudioSegment, list[SpeakerSegment], list[SpeakerSegment]]:
         """Extract user/agent audio using the configured isolation mode."""
-        if isolation_mode() == "partition":
+        mode = isolation_mode()
+        if mode == "timeline":
+            return self.extract_timeline_tracks(
+                audio,
+                segments,
+                human_speaker,
+                agent_speaker,
+            )
+        if mode == "partition":
             return self.extract_partition_tracks(
                 audio,
                 segments,
