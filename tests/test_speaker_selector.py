@@ -121,3 +121,40 @@ def test_raises_on_single_speaker():
     selector = SpeakerSelector()
     with pytest.raises(ValueError, match="Expected 2 speakers"):
         selector.identify(segments)
+
+
+def test_short_agent_led_no_backchannel_not_swapped():
+    """Short outbound call: agent dominates talk time without clear backchannels."""
+    segments = [
+        SpeakerSegment(speaker="SPEAKER_00", start=0.5, end=3.2),
+        SpeakerSegment(speaker="SPEAKER_00", start=4.0, end=6.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=7.0, end=9.8),
+        SpeakerSegment(speaker="SPEAKER_00", start=10.5, end=13.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=14.0, end=16.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=17.0, end=19.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=20.0, end=22.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=23.0, end=25.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=26.0, end=28.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=29.0, end=31.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=32.0, end=34.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=35.0, end=37.5),
+        SpeakerSegment(speaker="SPEAKER_00", start=38.0, end=40.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=41.0, end=43.0),
+        SpeakerSegment(speaker="SPEAKER_00", start=44.0, end=46.5),
+        SpeakerSegment(speaker="SPEAKER_01", start=48.0, end=49.2),
+        SpeakerSegment(speaker="SPEAKER_01", start=50.0, end=51.0),
+        SpeakerSegment(speaker="SPEAKER_01", start=52.0, end=53.5),
+        SpeakerSegment(speaker="SPEAKER_01", start=54.5, end=55.5),
+        SpeakerSegment(speaker="SPEAKER_01", start=56.5, end=58.0),
+        SpeakerSegment(speaker="SPEAKER_01", start=59.0, end=60.0),
+        SpeakerSegment(speaker="SPEAKER_01", start=61.0, end=62.5),
+        SpeakerSegment(speaker="SPEAKER_01", start=63.5, end=64.5),
+        SpeakerSegment(speaker="SPEAKER_01", start=65.5, end=67.0),
+        SpeakerSegment(speaker="SPEAKER_01", start=68.0, end=69.0),
+    ]
+
+    selector = SpeakerSelector()
+    result = selector.identify(segments)
+
+    assert result.human_speaker == "SPEAKER_01"
+    assert result.agent_speaker == "SPEAKER_00"

@@ -187,6 +187,82 @@ class SpeakerSelector:
         short = sum(1 for s in speaker_segs if s.duration < SHORT_UTTERANCE_SEC)
         return short / len(speaker_segs)
 
+    def _score_labeling(
+        self,
+        human_speaker: str,
+        agent_speaker: str,
+        stats: dict[str, dict],
+        short_ratios: dict[str, float],
+        durations: dict[str, float],
+    ) -> float:
+        """
+        Score how well a (human, agent) assignment fits voice-agent call patterns.
+
+        Evaluates both permutations and picks the higher score so short/ambiguous
+        calls are not misclassified by a single brittle rule chain.
+        """
+        h_short = short_ratios[human_speaker]
+        a_short = short_ratios[agent_speaker]
+        h_dur = durations.get(human_speaker, 0.0)
+        a_dur = durations.get(agent_speaker, 0.0)
+        h_avg = stats[human_speaker].get("avg_segment_duration", 0.0)
+        a_avg = stats[agent_speaker].get("avg_segment_duration", 0.0)
+        total = h_dur + a_dur or 1.0
+
+        score = 0.0
+
+        # User tends to produce more short backchannel utterances.
+        score += (h_short - a_short) * 2.5
+
+        # Outbound agent calls: agent usually holds more talk time.
+        score += ((a_dur - h_dur) / total) * 1.8
+
+        # Agent monologues tend to have longer average segment length.
+        if h_avg > 0 and a_avg > h_avg:
+            score += min((a_avg / h_avg) - 1.0, 1.5) * 1.2
+
+        long_delta = (
+            stats[agent_speaker].get("long_segment_ratio", 0.0)
+            - stats[human_speaker].get("long_segment_ratio", 0.0)
+        )
+        if a_dur > h_dur:
+            score += long_delta * 1.5
+        elif (
+            h_dur >= a_dur * USER_LED_DURATION_RATIO
+            and h_avg >= a_avg * 1.15
+        ):
+            human_long_delta = (
+                stats[human_speaker].get("long_segment_ratio", 0.0)
+                - stats[agent_speaker].get("long_segment_ratio", 0.0)
+            )
+            score += human_long_delta * 1.5
+
+        # Inbound user-led: human dominates talk time with longer explanations.
+        dominance = h_dur / max(a_dur, 0.1)
+        if (
+            h_dur >= a_dur * USER_LED_DURATION_RATIO
+            and h_avg >= a_avg * 1.15
+            and dominance >= 2.5
+        ):
+            score += 1.5 + (min(dominance, 5.0) - 1.0) * 0.5
+
+        # Penalty: longer speaker labeled as user without a backchannel profile
+        # (common misclassification on short agent-led outbound calls).
+        user_led = (
+            h_dur >= a_dur * USER_LED_DURATION_RATIO
+            and h_avg >= a_avg * 1.15
+            and dominance >= 2.5
+        )
+        if (
+            not user_led
+            and h_dur > a_dur * 1.2
+            and h_short < 0.35
+            and a_short < 0.35
+        ):
+            score -= 1.5
+
+        return score
+
     def _identify_by_call_patterns(
         self,
         segments: list[SpeakerSegment],
@@ -241,56 +317,81 @@ class SpeakerSelector:
         elif durations and len(speakers) == 2:
             longer = max(durations, key=durations.get)
             shorter = min(durations, key=durations.get)
-            dur_gap = abs(durations[longer] - durations[shorter]) / dur_total
-            short_gap = short_ratios[shorter] - short_ratios[longer]
+            dur_ratio = durations[longer] / max(durations[shorter], 0.1)
             avg_longer = stats[longer].get("avg_segment_duration", 0.0)
             avg_shorter = stats[shorter].get("avg_segment_duration", 0.0)
+            avg_ratio = avg_longer / max(avg_shorter, 0.1)
 
-            if (
-                dur_gap >= 0.12
-                and short_gap >= AGENT_LED_SHORT_GAP
-                and avg_longer > avg_shorter * AGENT_LED_AVG_SEG_RATIO
-            ):
-                # Agent-led: long monologues + shorter backchannels on the other side.
-                agent_speaker = longer
-                human_speaker = shorter
-                confidence = min(0.68 + dur_gap * 0.35 + short_gap * 0.4, 0.90)
-                logger.info(
-                    "Agent-led pattern: agent=%s (%.1fs, avg %.1fs) user=%s "
-                    "(%.1fs, %.0f%% short)",
-                    agent_speaker,
-                    durations[longer],
-                    avg_longer,
-                    human_speaker,
-                    durations[shorter],
-                    short_ratios[shorter] * 100,
-                )
-            elif durations[longer] >= durations[shorter] * USER_LED_DURATION_RATIO:
+            if dur_ratio >= 3.0 and avg_ratio >= 2.0:
                 human_speaker = longer
                 agent_speaker = shorter
-                confidence = min(0.60 + dur_gap * 0.4, 0.85)
+                confidence = min(0.72 + (dur_ratio - 3.0) * 0.05, 0.88)
                 logger.info(
-                    "User-led pattern: user=%s (%.1fs vs agent %.1fs)",
+                    "Strong user-led pattern: user=%s (%.1fs, avg %.1fs, "
+                    "%.1fx talk time)",
                     human_speaker,
-                    durations[human_speaker],
-                    durations[agent_speaker],
+                    durations[longer],
+                    avg_longer,
+                    dur_ratio,
                 )
             else:
-                scores = self._score_agent_likelihood(segments, speakers, stats, transcript)
-                agent_speaker = max(scores, key=scores.get)
-                human_speaker = [s for s in speakers if s != agent_speaker][0]
-                confidence = 0.55
-                logger.info(
-                    "Ambiguous call pattern; fallback scores → agent=%s user=%s",
-                    agent_speaker,
-                    human_speaker,
-                )
+                s0, s1 = speakers
+                score_a = self._score_labeling(s0, s1, stats, short_ratios, durations)
+                score_b = self._score_labeling(s1, s0, stats, short_ratios, durations)
+
+                if score_a >= score_b:
+                    human_speaker, agent_speaker = s0, s1
+                    best, alt = score_a, score_b
+                else:
+                    human_speaker, agent_speaker = s1, s0
+                    best, alt = score_b, score_a
+
+                margin = best - alt
+                confidence = min(0.55 + margin * 0.35, 0.90)
+
+                dur_total = sum(durations.values()) or 1.0
+                dur_gap = abs(durations[longer] - durations[shorter]) / dur_total
+                short_gap = short_ratios[shorter] - short_ratios[longer]
+
+                if (
+                    agent_speaker == longer
+                    and dur_gap >= 0.12
+                    and short_gap >= AGENT_LED_SHORT_GAP
+                    and avg_longer > avg_shorter * AGENT_LED_AVG_SEG_RATIO
+                ):
+                    logger.info(
+                        "Agent-led pattern: agent=%s (%.1fs, avg %.1fs) user=%s "
+                        "(%.1fs, %.0f%% short)",
+                        agent_speaker,
+                        durations[longer],
+                        avg_longer,
+                        human_speaker,
+                        durations[shorter],
+                        short_ratios[shorter] * 100,
+                    )
+                elif (
+                    human_speaker == longer
+                    and durations[longer] >= durations[shorter] * USER_LED_DURATION_RATIO
+                ):
+                    logger.info(
+                        "User-led pattern: user=%s (%.1fs vs agent %.1fs)",
+                        human_speaker,
+                        durations[human_speaker],
+                        durations[agent_speaker],
+                    )
+                else:
+                    logger.info(
+                        "Dual-hypothesis scoring: user=%s agent=%s (scores %.2f vs %.2f)",
+                        human_speaker,
+                        agent_speaker,
+                        best,
+                        alt,
+                    )
         else:
             scores = self._score_agent_likelihood(segments, speakers, stats, transcript)
             agent_speaker = max(scores, key=scores.get)
             human_speaker = [s for s in speakers if s != agent_speaker][0]
             confidence = 0.55
-            strategy = IdentificationStrategy.HEURISTICS
 
         strategy = IdentificationStrategy.HEURISTICS
 
